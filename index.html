@@ -89,6 +89,53 @@ button:disabled { opacity:.48; cursor:not-allowed; }
   main { padding:12px 10px 28px; }
   .card { padding:13px; border-radius:12px; }
 }
+
+  .quiz-actions {
+    display:flex;
+    gap:12px;
+    align-items:stretch;
+    margin-top:14px;
+  }
+  .quiz-actions #nextBtn {
+    flex:1;
+    min-height:56px;
+    font-size:18px;
+    font-weight:800;
+  }
+  .quiz-actions #markWrongBtn {
+    flex:1;
+    min-height:56px;
+    font-size:16px;
+    font-weight:700;
+    background:#fff4dc;
+    color:#9a5700;
+    border:2px solid #efb54d;
+  }
+  .quiz-actions #markWrongBtn.marked {
+    background:#ffe3e3;
+    color:#b42318;
+    border-color:#e26b6b;
+  }
+  #stopBtn {
+    font-size:13px;
+    padding:8px 12px;
+    min-height:auto;
+    color:#a33;
+    background:#fff;
+    border:1px solid #d8a3a3;
+  }
+  @media (max-width:600px) {
+    .quiz-actions {
+      flex-direction:column;
+    }
+    .quiz-actions #nextBtn {
+      order:1;
+    }
+    .quiz-actions #markWrongBtn {
+      order:2;
+    }
+  }
+
 </style>
 
 <link rel="manifest" href="manifest.json">
@@ -169,9 +216,10 @@ button:disabled { opacity:.48; cursor:not-allowed; }
   <section id="quiz" class="card hidden">
     <div class="topbar">
       <div id="progress" class="progress"></div>
-      <div class="row" style="gap:4px">
+      <div class="row" style="gap:6px">
         <button id="speakBtn" class="secondary" title="韓国語を読み上げ">🔊 音声</button>
         <button id="favoriteBtn" class="star" title="お気に入り">☆</button>
+        <button id="stopBtn" title="テストを終了">終了</button>
       </div>
     </div>
     <div id="prompt" class="prompt"></div>
@@ -182,10 +230,12 @@ button:disabled { opacity:.48; cursor:not-allowed; }
       <button id="submitBtn" class="primary">回答</button>
     </div>
     <div id="feedback" class="feedback"></div>
-    <div class="row">
+    <div id="preAnswerActions" class="row">
       <button id="dontKnowBtn" class="secondary">分からない</button>
-      <button id="nextBtn" class="primary hidden">次へ</button>
-      <button id="stopBtn" class="secondary">終了</button>
+    </div>
+    <div id="postAnswerActions" class="quiz-actions hidden">
+      <button id="nextBtn" class="primary">次へ</button>
+      <button id="markWrongBtn">できなかったことにする</button>
     </div>
   </section>
 
@@ -266,18 +316,10 @@ async function playWrongSound() {
   const ctx = await getReadyAudioContext();
   if (!ctx) return;
   const now = ctx.currentTime + 0.02;
-  const oscillator = ctx.createOscillator();
-  const gain = ctx.createGain();
-  oscillator.type = "triangle";
-  oscillator.frequency.setValueAtTime(230, now);
-  oscillator.frequency.exponentialRampToValueAtTime(120, now + 0.34);
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.19, now + 0.015);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
-  oscillator.connect(gain);
-  gain.connect(ctx.destination);
-  oscillator.start(now);
-  oscillator.stop(now + 0.40);
+
+  // Two clearly audible descending buzzer tones.
+  scheduleTone(ctx, 240, now, 0.22, 0.24, "square");
+  scheduleTone(ctx, 165, now + 0.20, 0.34, 0.26, "square");
 }
 
 
@@ -432,7 +474,11 @@ function showQuestion() {
   byId("question").textContent=session.dir==="ko-ja" ? w.ko : w.ja;
   byId("feedback").textContent="";
   byId("feedback").className="feedback";
-  byId("nextBtn").classList.add("hidden");
+  byId("postAnswerActions").classList.add("hidden");
+  byId("preAnswerActions").classList.remove("hidden");
+  byId("markWrongBtn").classList.remove("marked");
+  byId("markWrongBtn").textContent="できなかったことにする";
+  byId("markWrongBtn").disabled=false;
   byId("dontKnowBtn").disabled=false;
   byId("choices").innerHTML="";
   byId("answerInput").value="";
@@ -468,6 +514,7 @@ function answer(value, button=null) {
   const correctText=session.dir==="ko-ja" ? w.ja : w.ko;
   const answers=acceptedAnswers(correctText);
   const ok=answers.includes(normalize(value));
+  session.currentWasCorrect=ok;
 
   state.attempts++;
   if(ok) {
@@ -495,8 +542,40 @@ function answer(value, button=null) {
     byId("answerInput").disabled=true; byId("submitBtn").disabled=true;
   }
   byId("nextBtn").textContent=session.index===session.words.length-1 ? "結果を見る" : "次へ";
-  byId("nextBtn").classList.remove("hidden");
+  byId("preAnswerActions").classList.add("hidden");
+  byId("postAnswerActions").classList.remove("hidden");
+
+  if(!ok) {
+    byId("markWrongBtn").textContent="できなかったに登録済み";
+    byId("markWrongBtn").classList.add("marked");
+    byId("markWrongBtn").disabled=true;
+  }
 }
+function markCurrentAsWrong() {
+  if(!session || !session.answered) return;
+
+  const w=session.words[session.index];
+
+  if(!state.wrong.includes(w.no)) state.wrong.push(w.no);
+  if(!session.wrongNos.includes(w.no)) session.wrongNos.push(w.no);
+
+  // Correct-answer statistics are adjusted so an accidental guess
+  // does not remain counted as mastered.
+  if(session.currentWasCorrect) {
+    state.correct=Math.max(0,state.correct-1);
+    session.correct=Math.max(0,session.correct-1);
+    session.currentWasCorrect=false;
+  }
+
+  saveState();
+  byId("feedback").textContent += "　→ できなかった単語に登録しました";
+  byId("feedback").className="feedback bad";
+  byId("markWrongBtn").textContent="できなかったに登録済み";
+  byId("markWrongBtn").classList.add("marked");
+  byId("markWrongBtn").disabled=true;
+  playWrongSound();
+}
+
 function answerDontKnow() {
   if(!session || session.answered) return;
   const w=session.words[session.index];
@@ -561,10 +640,12 @@ byId("startBtn").onclick=async()=>{ await unlockAudio(); startQuiz(); };
 byId("speakBtn").onclick=speakCurrentWord;
 byId("dontKnowBtn").onclick=answerDontKnow;
 byId("submitBtn").onclick=async()=>{ await unlockAudio(); answer(byId("answerInput").value); };
-byId("answerInput").addEventListener("keydown",e=>{if(e.key==="Enter") {
-  if(!session.answered) answer(byId("answerInput").value); else nextQuestion();
+byId("answerInput").addEventListener("keydown",async e=>{if(e.key==="Enter") {
+  if(!session.answered) { await unlockAudio(); answer(byId("answerInput").value); }
+  else nextQuestion();
 }});
 byId("nextBtn").onclick=nextQuestion;
+byId("markWrongBtn").onclick=markCurrentAsWrong;
 byId("stopBtn").onclick=()=>{ if(confirm("テストを終了しますか？")) finishQuiz(); };
 byId("favoriteBtn").onclick=toggleFavorite;
 byId("backBtn").onclick=backToSetup;
