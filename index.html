@@ -200,6 +200,68 @@ const KEY = "topik1671_simple_v1";
 let state = loadState();
 let session = null;
 
+let audioContext = null;
+
+function getAudioContext() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  if (!audioContext) audioContext = new AudioCtx();
+  if (audioContext.state === "suspended") audioContext.resume();
+  return audioContext;
+}
+
+function playTone(frequency, startTime, duration, volume=0.13, type="sine") {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, startTime);
+
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.exponentialRampToValueAtTime(volume, startTime + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+  oscillator.connect(gain);
+  gain.connect(ctx.destination);
+  oscillator.start(startTime);
+  oscillator.stop(startTime + duration + 0.02);
+}
+
+function playCorrectSound() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  playTone(659.25, now, 0.16, 0.12, "sine");
+  playTone(783.99, now + 0.11, 0.18, 0.12, "sine");
+  playTone(1046.50, now + 0.22, 0.28, 0.14, "sine");
+}
+
+function playWrongSound() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  oscillator.type = "triangle";
+  oscillator.frequency.setValueAtTime(220, now);
+  oscillator.frequency.exponentialRampToValueAtTime(135, now + 0.30);
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.13, now + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+
+  oscillator.connect(gain);
+  gain.connect(ctx.destination);
+  oscillator.start(now);
+  oscillator.stop(now + 0.36);
+}
+
+
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
@@ -374,11 +436,13 @@ function answer(value, button=null) {
     state.wrong=state.wrong.filter(n=>n!==w.no);
     byId("feedback").textContent="正解！";
     byId("feedback").className="feedback good";
+    playCorrectSound();
   } else {
     if(!state.wrong.includes(w.no)) state.wrong.push(w.no);
     if(!session.wrongNos.includes(w.no)) session.wrongNos.push(w.no);
     byId("feedback").textContent=`不正解　正解：${correctText}`;
     byId("feedback").className="feedback bad";
+    playWrongSound();
   }
   saveState();
 

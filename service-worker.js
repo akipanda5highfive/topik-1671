@@ -1,4 +1,4 @@
-const CACHE_NAME = 'topik-1671-v2';
+const CACHE_NAME = 'topik-1671-v3-sounds';
 const ASSETS = [
   './',
   './index.html',
