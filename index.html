@@ -97,6 +97,8 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="TOPIK 1671">
 <link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="shortcut icon" href="icon-192.png">
 
 </head>
 <body>
@@ -125,6 +127,10 @@ button:disabled { opacity:.48; cursor:not-allowed; }
       <div>
         <label for="count">問題数</label>
         <input id="count" type="number" min="1" max="1671" value="20">
+      </div>
+      <div>
+        <label for="startNo">開始番号</label>
+        <input id="startNo" type="number" min="1" max="1671" value="1">
       </div>
       <div>
         <label for="range">出題範囲</label>
@@ -209,9 +215,26 @@ function loadState() {
 }
 function saveState() { localStorage.setItem(KEY, JSON.stringify(state)); renderStats(); }
 function byId(id) { return document.getElementById(id); }
+function secureRandomInt(maxExclusive) {
+  if(maxExclusive <= 1) return 0;
+  if(window.crypto && window.crypto.getRandomValues) {
+    const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
+    const buf = new Uint32Array(1);
+    let value;
+    do {
+      window.crypto.getRandomValues(buf);
+      value = buf[0];
+    } while(value >= limit);
+    return value % maxExclusive;
+  }
+  return Math.floor(Math.random() * maxExclusive);
+}
 function shuffle(a) {
   const b=[...a];
-  for(let i=b.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1)); [b[i],b[j]]=[b[j],b[i]]; }
+  for(let i=b.length-1;i>0;i--) {
+    const j=secureRandomInt(i+1);
+    [b[i],b[j]]=[b[j],b[i]];
+  }
   return b;
 }
 function unique(arr) { return [...new Set(arr)]; }
@@ -233,10 +256,19 @@ function renderStats() {
 }
 function updateRangeNote() {
   const r=byId("range").value;
-  let n=WORDS.length;
-  if(r==="wrong") n=state.wrong.length;
-  if(r==="favorite") n=state.favorites.length;
-  byId("rangeNote").textContent=`現在の対象：${n}語`;
+  const startNo=Math.max(1,Math.min(WORDS.length,Number(byId("startNo")?.value)||1));
+  let pool;
+  if(r==="wrong") {
+    const set=new Set(state.wrong);
+    pool=WORDS.filter(w=>set.has(w.no) && w.no>=startNo);
+  } else if(r==="favorite") {
+    const set=new Set(state.favorites);
+    pool=WORDS.filter(w=>set.has(w.no) && w.no>=startNo);
+  } else {
+    pool=WORDS.filter(w=>w.no>=startNo);
+  }
+  const order=byId("randomize")?.checked ? "ランダム" : "番号順";
+  byId("rangeNote").textContent=`開始：No.${startNo}／対象：${pool.length}語／出題順：${order}`;
 }
 function getPool() {
   const r=byId("range").value;
@@ -250,15 +282,22 @@ function getPool() {
   }
   return [...WORDS];
 }
+function applyStartNumber(pool) {
+  const startNo=Math.max(1,Math.min(WORDS.length,Number(byId("startNo").value)||1));
+  byId("startNo").value=startNo;
+  return pool.filter(w=>w.no>=startNo);
+}
 function startQuiz(customNos=null) {
   let pool;
   if(customNos) {
     const set=new Set(customNos);
     pool=WORDS.filter(w=>set.has(w.no));
-  } else pool=getPool();
+  } else {
+    pool=applyStartNumber(getPool());
+  }
 
   if(!pool.length) {
-    alert(byId("range").value==="wrong" ? "まだ間違えた単語がありません。" : "対象となる単語がありません。");
+    alert(byId("range").value==="wrong" ? "指定した開始番号以降に、間違えた単語がありません。" : "指定した開始番号以降に対象となる単語がありません。");
     return;
   }
   const requested=Math.max(1, Math.min(Number(byId("count").value)||20, pool.length));
@@ -268,7 +307,8 @@ function startQuiz(customNos=null) {
 
   session={
     words:pool,index:0,correct:0,answered:false,wrongNos:[],
-    direction:byId("direction").value,mode:byId("mode").value
+    direction:byId("direction").value,mode:byId("mode").value,
+    randomized:byId("randomize").checked
   };
   byId("setup").classList.add("hidden");
   byId("result").classList.add("hidden");
@@ -286,7 +326,7 @@ function showQuestion() {
   session.dir=currentDirection();
   session.qmode=currentMode();
   const w=session.words[session.index];
-  byId("progress").textContent=`${session.index+1} / ${session.words.length}`;
+  byId("progress").textContent=`${session.index+1} / ${session.words.length}　No.${w.no}　${session.randomized ? "🎲ランダム" : "番号順"}`;
   byId("prompt").textContent=session.dir==="ko-ja" ? "日本語の意味は？" : "韓国語では？";
   byId("question").textContent=session.dir==="ko-ja" ? w.ko : w.ja;
   byId("feedback").textContent="";
@@ -427,6 +467,8 @@ byId("favoriteBtn").onclick=toggleFavorite;
 byId("backBtn").onclick=backToSetup;
 byId("retryWrongBtn").onclick=()=>startQuiz(session.wrongNos);
 byId("range").onchange=updateRangeNote;
+byId("startNo").oninput=updateRangeNote;
+byId("randomize").onchange=updateRangeNote;
 byId("resetStatsBtn").onclick=()=>{
   if(confirm("正答率・間違い・お気に入りの記録をすべて消しますか？")) {
     state={attempts:0,correct:0,wrong:[],favorites:[]}; saveState();
